@@ -1,0 +1,11 @@
+rootDirectory = "red-gambit"
+
+[install]
+command = "npm install"
+
+[build]
+command = "npm run build"
+
+[dev]
+command = "npm run dev"
+
