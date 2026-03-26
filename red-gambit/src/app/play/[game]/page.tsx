@@ -94,7 +94,7 @@ export default function PlayPage() {
               </div>
               <div className="text-right">
                 <div className="text-xs text-white/60">MODE</div>
-                <div className="mt-1 text-sm font-bold text-white/90">Vs AI</div>
+                <div className="mt-1 flex flex-wrap text-sm font-bold text-white/90">Vs AI</div>
               </div>
             </div>
 

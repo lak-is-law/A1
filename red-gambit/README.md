@@ -21,8 +21,13 @@ pip install -r requirements.txt
 In a new terminal:
 ```bash
 cd red-gambit
-AI_ENGINE_URL=http://127.0.0.1:8001 npm run dev
+npm install   # copies Stockfish WASM to public/stockfish (postinstall)
+npm run dev
 ```
+
+**Chess engines**
+- **Human mode** uses the built-in Minimax API (`POST /api/engine/move`).
+- **God mode** uses **Stockfish.js** (WASM) in a browser Web Worker, served from `public/stockfish/`.
 
 ### 3) Try it
 - Landing: `/`

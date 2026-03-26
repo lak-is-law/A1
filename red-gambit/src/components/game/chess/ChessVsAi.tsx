@@ -3,6 +3,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Chess, type Move, type Square } from "chess.js";
 import { motion } from "framer-motion";
+import { useRouter } from "next/navigation";
+
+import { OutcomeModal } from "@/components/game/OutcomeModal";
+import { describeEvaluation, getBestMove, type ChessAiMode } from "@/lib/ai/getBestMove";
 
 const INITIAL_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
@@ -72,16 +76,21 @@ function timeForDifficulty(d: Difficulty) {
 }
 
 export function ChessVsAi({ difficulty }: { difficulty: Difficulty }) {
+  const router = useRouter();
   const [mounted, setMounted] = useState(false);
+  const [aiMode, setAiMode] = useState<ChessAiMode>("minimax");
   const [timeline, setTimeline] = useState<string[]>([INITIAL_FEN]);
   const [cursor, setCursor] = useState(0);
   const fen = timeline[cursor];
 
   const [selected, setSelected] = useState<Square | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
+  const [evalHint, setEvalHint] = useState<string>("");
   const [hintCount, setHintCount] = useState(3);
   const [hintMove, setHintMove] = useState<string | null>(null);
-  const [aiMeta, setAiMeta] = useState<{ depth: number; nodes: number; score: number } | null>(null);
+  const [aiMeta, setAiMeta] = useState<{ depth: number; nodes: number; score: number; source: ChessAiMode } | null>(
+    null
+  );
 
   const chess = useMemo(() => new Chess(fen), [fen]);
 
@@ -96,6 +105,35 @@ export function ChessVsAi({ difficulty }: { difficulty: Difficulty }) {
   const playerColor = "w";
   const isGameOver = chess.isGameOver();
   const isCheckmate = chess.isCheckmate();
+  const isStalemate = chess.isStalemate();
+  const isDraw = chess.isDraw();
+
+  const outcome = useMemo(() => {
+    if (!mounted) return null;
+
+    if (isCheckmate) {
+      const playerWon = chess.turn() === aiColor; // side to move is checkmated
+      return {
+        open: true,
+        tone: "checkmate" as const,
+        title: playerWon ? "YOU WIN" : "YOU LOSE",
+        message: playerWon
+          ? "Checkmate. Sacrifice Everything. Win Anyway."
+          : "Checkmate. The gambit collapses—Red Gambit seals the board.",
+      };
+    }
+
+    if (isStalemate || isDraw) {
+      return {
+        open: true,
+        tone: "stalemate" as const,
+        title: "DRAW",
+        message: "Stalemate. The battle ends in silence—until the next gambit.",
+      };
+    }
+
+    return null;
+  }, [mounted, isCheckmate, isStalemate, isDraw, chess, aiColor]);
 
   const legalTargets = useMemo(() => {
     if (!selected) return new Set<Square>();
@@ -127,26 +165,20 @@ export function ChessVsAi({ difficulty }: { difficulty: Difficulty }) {
   async function requestAiMove(currentFen: string) {
     const requestId = ++requestIdRef.current;
     setAiLoading(true);
+    setEvalHint("");
     setHintMove(null);
 
     try {
-      const res = await fetch("/api/engine/move", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          game: "chess",
-          difficulty,
-          fen: currentFen,
-          time_ms: timeForDifficulty(difficulty),
-        }),
+      const mode = aiMode;
+      const result = await getBestMove(mode, currentFen, {
+        stockfish: { depth: 15, timeoutMs: 45_000 },
+        minimax: { difficulty, time_ms: timeForDifficulty(difficulty) },
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error ?? "Engine error");
 
       if (requestId !== requestIdRef.current) return; // ignore stale
 
-      const uci = data?.move as string | undefined;
-      if (!uci) throw new Error("Engine did not return a move");
+      const uci = result.bestMove;
+      setEvalHint(describeEvaluation(result.whiteAdvantage, result.mateForWhite));
 
       const moveSpec = uciToMove(uci);
       if (!moveSpec) throw new Error("Invalid UCI move");
@@ -165,7 +197,15 @@ export function ChessVsAi({ difficulty }: { difficulty: Difficulty }) {
         return [...head, nextFen];
       });
       setCursor((v) => v + 1);
-      setAiMeta({ depth: data?.depth ?? 0, nodes: data?.nodes ?? 0, score: data?.score ?? 0 });
+      const metaScore =
+        result.whiteAdvantage ??
+        (result.mateForWhite !== undefined && result.mateForWhite !== 0 ? result.mateForWhite * 1_000_000 : 0);
+      setAiMeta({
+        depth: result.depth ?? 0,
+        nodes: result.nodes ?? 0,
+        score: metaScore,
+        source: result.source,
+      });
       vibrate([12, 10, 18]);
     } catch {
       setAiMeta(null);
@@ -182,14 +222,14 @@ export function ChessVsAi({ difficulty }: { difficulty: Difficulty }) {
     if (chess.turn() !== aiColor) return;
     void requestAiMove(fen);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fen, isGameOver, aiLoading]);
+  }, [fen, isGameOver, aiLoading, aiMode]);
 
   useEffect(() => {
     if (!mounted) return;
     if (!isCheckmate) return;
     if (lastCheckmateFenRef.current === fen) return;
     lastCheckmateFenRef.current = fen;
-    vibrate([35, 20, 35, 20, 65]);
+    // Outcome feedback is handled by OutcomeModal.
   }, [fen, mounted, isCheckmate]);
 
   function resetGame() {
@@ -198,6 +238,7 @@ export function ChessVsAi({ difficulty }: { difficulty: Difficulty }) {
     setHintCount(3);
     setHintMove(null);
     setAiMeta(null);
+    setEvalHint("");
     setAiLoading(false);
     setTimeline([INITIAL_FEN]);
     setCursor(0);
@@ -230,21 +271,13 @@ export function ChessVsAi({ difficulty }: { difficulty: Difficulty }) {
     const requestId = ++requestIdRef.current;
 
     try {
-      const res = await fetch("/api/engine/move", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          game: "chess",
-          difficulty,
-          fen,
-          time_ms: 1200,
-        }),
+      const result = await getBestMove(aiMode, fen, {
+        stockfish: { depth: 12, timeoutMs: 30_000 },
+        minimax: { difficulty, time_ms: 1200 },
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error ?? "Engine error");
       if (requestId !== requestIdRef.current) return;
 
-      const uci = data?.move as string | undefined;
+      const uci = result.bestMove;
       if (!uci) throw new Error("Missing hint move");
       setHintMove(uci);
       setHintCount((n) => Math.max(0, n - 1));
@@ -324,21 +357,50 @@ export function ChessVsAi({ difficulty }: { difficulty: Difficulty }) {
         <div className="text-sm">
           <div className="text-xs font-semibold tracking-[0.22em] text-white/60">CHESS</div>
           <div className="mt-1 font-extrabold">{isGameOver ? "Game Over" : chess.turn() === playerColor ? "Your turn" : "AI turn"}</div>
-          {isCheckmate ? (
-            <div className="mt-2 text-xs text-white/65">
-              {chess.turn() === aiColor
-                ? "Checkmate. You delivered the gambit—congratulations."
-                : "Checkmate. The AI sacrifices everything and seals it."}
-            </div>
-          ) : null}
+          <div className="mt-1 text-xs font-bold text-white/70">
+            {aiMode === "stockfish" ? "🔥 God Mode (Stockfish)" : "🧠 Human Mode (Minimax)"}
+          </div>
+          {aiLoading ? <div className="mt-1 text-xs text-[color:var(--rb-accent)]">AI thinking…</div> : null}
+          {evalHint ? <div className="mt-1 text-xs text-white/65">{evalHint}</div> : null}
           {aiMeta ? (
             <div className="mt-1 text-xs text-white/60">
-              Depth {aiMeta.depth} · Nodes {aiMeta.nodes} · Score {Math.round(aiMeta.score)}
+              {aiMeta.source === "stockfish"
+                ? `Stockfish (depth ${aiMeta.depth})`
+                : `Depth ${aiMeta.depth} · Nodes ${aiMeta.nodes}`}
+              · Score {Math.round(aiMeta.score)}
             </div>
           ) : (
             <div className="mt-1 text-xs text-white/55">Click-to-move. Undo/redo supported.</div>
           )}
         </div>
+
+        <div className="flex flex-col items-end gap-2 sm:flex-row sm:items-center">
+          <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-bold select-none">
+            <span className="text-white/60">AI</span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={aiMode === "stockfish"}
+              disabled={aiLoading}
+              onClick={() => setAiMode((m) => (m === "stockfish" ? "minimax" : "stockfish"))}
+              className={[
+                "relative h-7 w-12 rounded-full transition-colors",
+                aiMode === "stockfish" ? "bg-[color:var(--rb-accent)]/50" : "bg-white/15",
+                aiLoading ? "opacity-50" : "",
+              ].join(" ")}
+            >
+              <span
+                className={[
+                  "absolute top-0.5 h-6 w-6 rounded-full bg-white shadow transition-transform",
+                  aiMode === "stockfish" ? "translate-x-6" : "translate-x-0.5",
+                ].join(" ")}
+                style={{ left: "-4px", top: "1px" }}
+              />
+            </button>
+            <span className="max-w-[7rem] text-right text-[11px] text-white/80">
+              {aiMode === "stockfish" ? "God" : "Human"}
+            </span>
+          </label>
 
         <div className="flex items-center gap-2">
           <button
@@ -373,6 +435,7 @@ export function ChessVsAi({ difficulty }: { difficulty: Difficulty }) {
           >
             Hint ({hintCount})
           </button>
+        </div>
         </div>
       </div>
 
@@ -460,6 +523,16 @@ export function ChessVsAi({ difficulty }: { difficulty: Difficulty }) {
           })}
         </div>
       </div>
+      {outcome ? (
+        <OutcomeModal
+          open={true}
+          title={outcome.title}
+          message={outcome.message}
+          tone={outcome.tone}
+          onExitToMenu={() => router.push("/")}
+          hapticsOn
+        />
+      ) : null}
     </div>
   );
 }

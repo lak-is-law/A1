@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { OutcomeModal } from "@/components/game/OutcomeModal";
 
 type Difficulty = "adaptive" | "medium" | "hard";
 type Stone = 1 | 0 | -1; // 1 black, -1 white, 0 empty
@@ -95,10 +97,16 @@ function parseAiMove(moveStr: string): number | null {
 }
 
 export function BadukVsAi({ difficulty }: { difficulty: Difficulty }) {
+  const router = useRouter();
   const initialBoard = useMemo<Stone[]>(() => new Array(SIZE * SIZE).fill(0) as Stone[], []);
   const [timeline, setTimeline] = useState<Stone[][]>([initialBoard]);
   const [cursor, setCursor] = useState(0);
   const board = timeline[cursor];
+
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const playerToPlay: Stone = 1; // human plays black
   const aiToPlay: Stone = -1;
@@ -112,6 +120,43 @@ export function BadukVsAi({ difficulty }: { difficulty: Difficulty }) {
   const toPlay: Stone = isPlayersTurn ? playerToPlay : aiToPlay;
 
   const canPlay = !aiLoading && isPlayersTurn;
+
+  const [consecutivePasses, setConsecutivePasses] = useState(0);
+  const isBoardFull = useMemo(() => board.every((v) => v !== 0), [board]);
+
+  const outcome = useMemo(() => {
+    if (!mounted) return null;
+    if (consecutivePasses < 2 && !isBoardFull) return null;
+
+    // Simple scoring approximation consistent with server eval: stones + adjacency-based territory.
+    const black = board.reduce<number>((acc, v) => acc + (v === 1 ? 1 : 0), 0);
+    const white = board.reduce<number>((acc, v) => acc + (v === -1 ? 1 : 0), 0);
+
+    let territoryBlack = 0;
+    let territoryWhite = 0;
+    for (let idx = 0; idx < board.length; idx++) {
+      if (board[idx] !== 0) continue;
+      const adj = neighbors(idx).map((n) => board[n]);
+      const b = adj.filter((x) => x === 1).length;
+      const w = adj.filter((x) => x === -1).length;
+      if (b > w) territoryBlack += 1;
+      else if (w > b) territoryWhite += 1;
+    }
+
+    // Mirrors `evaluate_go` directionality.
+    let raw = (black - white) * 120 + (territoryBlack - territoryWhite) * 90;
+    raw -= KOMI * 60; // White gets compensation via komi
+
+    if (raw > 0) {
+      return { tone: "win" as const, title: "YOU WIN", message: "Two passes. Your territory holds." };
+    }
+    if (raw < 0) {
+      return { tone: "lose" as const, title: "YOU LOSE", message: "Two passes. The court belongs to the AI." };
+    }
+    return { tone: "draw" as const, title: "DRAW", message: "Two passes. The balance is exact." };
+  }, [mounted, consecutivePasses, isBoardFull, board]);
+
+  const gameOver = Boolean(outcome);
 
   async function requestAiMove(currentBoard: Stone[], currentCursor: number) {
     const requestId = ++requestIdRef.current;
@@ -147,6 +192,8 @@ export function BadukVsAi({ difficulty }: { difficulty: Difficulty }) {
         return [...head, nextBoard];
       });
       setCursor((v) => v + 1);
+      if (moveIdx === null) setConsecutivePasses((n) => n + 1);
+      else setConsecutivePasses(0);
       setAiMeta({ depth: data?.depth ?? 0, nodes: data?.nodes ?? 0, score: data?.score ?? 0 });
     } catch {
       setAiMeta(null);
@@ -159,9 +206,10 @@ export function BadukVsAi({ difficulty }: { difficulty: Difficulty }) {
   useEffect(() => {
     if (aiLoading) return;
     if (isPlayersTurn) return;
+    if (gameOver) return;
     void requestAiMove(board, cursor);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [board, cursor, aiLoading, isPlayersTurn]);
+  }, [board, cursor, aiLoading, isPlayersTurn, gameOver]);
 
   function resetGame() {
     requestIdRef.current += 1;
@@ -169,6 +217,7 @@ export function BadukVsAi({ difficulty }: { difficulty: Difficulty }) {
     setAiMeta(null);
     setTimeline([initialBoard]);
     setCursor(0);
+    setConsecutivePasses(0);
   }
 
   function undo() {
@@ -185,6 +234,7 @@ export function BadukVsAi({ difficulty }: { difficulty: Difficulty }) {
 
   async function onIntersection(r: number, c: number) {
     if (!canPlay) return;
+    if (gameOver) return;
     const idx = idxOf(r, c);
     if (!isLegalMove(board, idx, playerToPlay)) return;
 
@@ -192,6 +242,25 @@ export function BadukVsAi({ difficulty }: { difficulty: Difficulty }) {
     setTimeline((prev) => [...prev.slice(0, cursor + 1), next]);
     setCursor((v) => v + 1);
     setAiMeta(null);
+    setConsecutivePasses(0);
+  }
+
+  function onPass() {
+    if (!canPlay) return;
+    if (gameOver) return;
+    const next = applyMove(board, null, playerToPlay);
+    setTimeline((prev) => [...prev.slice(0, cursor + 1), next]);
+    setCursor((v) => v + 1);
+    setAiMeta(null);
+    setConsecutivePasses((n) => n + 1);
+  }
+
+  if (!mounted) {
+    return (
+      <div className="space-y-4">
+        <div className="rb-glass rounded-[28px] p-4 h-[520px] animate-pulse" />
+      </div>
+    );
   }
 
   return (
@@ -234,6 +303,15 @@ export function BadukVsAi({ difficulty }: { difficulty: Difficulty }) {
           >
             Redo
           </button>
+
+          <button
+            type="button"
+            onClick={onPass}
+            className="rounded-xl border border-[color:var(--rb-accent)]/30 bg-[color:var(--rb-accent)]/10 px-3 py-2 text-sm font-bold hover:bg-[color:var(--rb-accent)]/20 transition disabled:opacity-60"
+            disabled={!canPlay || aiLoading || gameOver}
+          >
+            Pass
+          </button>
         </div>
       </div>
 
@@ -274,6 +352,17 @@ export function BadukVsAi({ difficulty }: { difficulty: Difficulty }) {
           )}
         </div>
       </div>
+
+      {outcome ? (
+        <OutcomeModal
+          open={true}
+          title={outcome.title}
+          message={outcome.message}
+          tone={outcome.tone}
+          onExitToMenu={() => router.push("/")}
+          hapticsOn
+        />
+      ) : null}
     </div>
   );
 }

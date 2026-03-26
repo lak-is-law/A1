@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Third-party asset copied by `scripts/copy-stockfish.mjs`.
+    // ESLint rules (like no-require-imports) don't apply to that blob.
+    "public/stockfish/**",
   ]),
 ]);
 

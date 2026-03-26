@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { useThemeStore } from "@/lib/theme/themeStore";
+import { useRouter } from "next/navigation";
+import { OutcomeModal } from "@/components/game/OutcomeModal";
 
 type Difficulty = "easy" | "medium" | "hard";
 type Phase = "setup" | "battle" | "replay";
@@ -362,6 +364,7 @@ function randomPick(args: { aiShots: Knowledge }) {
 }
 
 export function BattleshipVsAi({ difficulty }: { difficulty: "adaptive" | "medium" | "hard" }) {
+  const router = useRouter();
   const theme = useThemeStore((s) => s.theme);
   const [mounted, setMounted] = useState(false);
 
@@ -715,7 +718,6 @@ export function BattleshipVsAi({ difficulty }: { difficulty: "adaptive" | "mediu
         at: Date.now(),
       });
       if (hapticsOn) safeVibrate([55, 25, 65, 25, 75]);
-      if (soundOn) tone("victory");
     } else if (aiWins) {
       setPhase("replay");
       setReplayIndex(events.length);
@@ -728,7 +730,6 @@ export function BattleshipVsAi({ difficulty }: { difficulty: "adaptive" | "mediu
         at: Date.now(),
       });
       if (hapticsOn) safeVibrate([30, 15, 30]);
-      if (soundOn) tone("victory");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [playerWins, aiWins, phase, mounted]);
@@ -1054,6 +1055,25 @@ export function BattleshipVsAi({ difficulty }: { difficulty: "adaptive" | "mediu
       ? "Defeat. The AI sinks the final route—Red Gambit is punished."
       : null;
 
+  const outcome = useMemo(() => {
+    if (!isBattleOver) return null;
+    if (playerWins) {
+      return {
+        tone: "win" as const,
+        title: "YOU WIN",
+        message: "The red fleet wins the battle line.",
+      };
+    }
+    if (aiWins) {
+      return {
+        tone: "lose" as const,
+        title: "YOU LOSE",
+        message: "The AI sinks the final route—Red Gambit is punished.",
+      };
+    }
+    return null;
+  }, [isBattleOver, playerWins, aiWins]);
+
   if (!mounted) {
     return (
       <div className="space-y-4">
@@ -1268,6 +1288,17 @@ export function BattleshipVsAi({ difficulty }: { difficulty: "adaptive" | "mediu
             Replay is currently focused on shot outcomes. Extending to full “sinking adjacency” visuals is straightforward after we store full sunk-step metadata.
           </div>
         </div>
+      ) : null}
+
+      {outcome ? (
+        <OutcomeModal
+          open={true}
+          title={outcome.title}
+          message={outcome.message}
+          tone={outcome.tone}
+          onExitToMenu={() => router.push("/")}
+          hapticsOn={hapticsOn}
+        />
       ) : null}
     </div>
   );
