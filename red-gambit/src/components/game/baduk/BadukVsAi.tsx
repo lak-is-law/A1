@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { OutcomeModal } from "@/components/game/OutcomeModal";
 
-type Difficulty = "adaptive" | "medium" | "hard";
+type Difficulty = "adaptive" | "medium" | "hard" | "god";
 type Stone = 1 | 0 | -1; // 1 black, -1 white, 0 empty
 
 const SIZE = 9;
@@ -13,6 +13,7 @@ const KOMI = 7.5;
 function timeForDifficulty(d: Difficulty) {
   if (d === "medium") return 1300;
   if (d === "hard") return 2200;
+  if (d === "god") return 4200;
   return 1700;
 }
 
@@ -114,6 +115,7 @@ export function BadukVsAi({ difficulty }: { difficulty: Difficulty }) {
 
   const [aiLoading, setAiLoading] = useState(false);
   const [aiMeta, setAiMeta] = useState<{ depth: number; nodes: number; score: number } | null>(null);
+  const [aiError, setAiError] = useState<string | null>(null);
 
   const requestIdRef = useRef(0);
 
@@ -180,6 +182,7 @@ export function BadukVsAi({ difficulty }: { difficulty: Difficulty }) {
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error ?? "Engine error");
       if (requestId !== requestIdRef.current) return;
+      setAiError(null);
 
       const moveStr = data?.move as string | undefined;
       if (!moveStr) throw new Error("Missing move");
@@ -195,8 +198,12 @@ export function BadukVsAi({ difficulty }: { difficulty: Difficulty }) {
       if (moveIdx === null) setConsecutivePasses((n) => n + 1);
       else setConsecutivePasses(0);
       setAiMeta({ depth: data?.depth ?? 0, nodes: data?.nodes ?? 0, score: data?.score ?? 0 });
-    } catch {
+    } catch (e) {
       setAiMeta(null);
+      if (requestId === requestIdRef.current) {
+        const message = e instanceof Error && e.message ? e.message : "Engine unavailable";
+        setAiError(message);
+      }
     } finally {
       if (requestId === requestIdRef.current) setAiLoading(false);
     }
@@ -205,16 +212,18 @@ export function BadukVsAi({ difficulty }: { difficulty: Difficulty }) {
   // Auto respond when it's the AI's turn.
   useEffect(() => {
     if (aiLoading) return;
+    if (aiError) return;
     if (isPlayersTurn) return;
     if (gameOver) return;
     void requestAiMove(board, cursor);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [board, cursor, aiLoading, isPlayersTurn, gameOver]);
+  }, [board, cursor, aiLoading, aiError, isPlayersTurn, gameOver]);
 
   function resetGame() {
     requestIdRef.current += 1;
     setAiLoading(false);
     setAiMeta(null);
+    setAiError(null);
     setTimeline([initialBoard]);
     setCursor(0);
     setConsecutivePasses(0);
@@ -223,13 +232,20 @@ export function BadukVsAi({ difficulty }: { difficulty: Difficulty }) {
   function undo() {
     if (aiLoading) return;
     if (cursor <= 0) return;
-    setCursor((v) => v - 1);
+    const steps = isPlayersTurn ? Math.min(2, cursor) : 1;
+    setAiError(null);
+    setAiMeta(null);
+    setCursor((v) => Math.max(0, v - steps));
   }
 
   function redo() {
     if (aiLoading) return;
     if (cursor >= timeline.length - 1) return;
-    setCursor((v) => v + 1);
+    const canAdvanceFullTurn = isPlayersTurn && cursor + 2 <= timeline.length - 1;
+    const steps = canAdvanceFullTurn ? 2 : 1;
+    setAiError(null);
+    setAiMeta(null);
+    setCursor((v) => Math.min(timeline.length - 1, v + steps));
   }
 
   async function onIntersection(r: number, c: number) {
@@ -242,6 +258,7 @@ export function BadukVsAi({ difficulty }: { difficulty: Difficulty }) {
     setTimeline((prev) => [...prev.slice(0, cursor + 1), next]);
     setCursor((v) => v + 1);
     setAiMeta(null);
+    setAiError(null);
     setConsecutivePasses(0);
   }
 
@@ -252,6 +269,7 @@ export function BadukVsAi({ difficulty }: { difficulty: Difficulty }) {
     setTimeline((prev) => [...prev.slice(0, cursor + 1), next]);
     setCursor((v) => v + 1);
     setAiMeta(null);
+    setAiError(null);
     setConsecutivePasses((n) => n + 1);
   }
 
@@ -269,7 +287,9 @@ export function BadukVsAi({ difficulty }: { difficulty: Difficulty }) {
         <div className="text-sm">
           <div className="text-xs font-semibold tracking-[0.22em] text-white/60">BADUK</div>
           <div className="mt-1 font-extrabold">{isPlayersTurn ? "Your turn (Black)" : "AI turn"}</div>
-          {aiMeta ? (
+          {aiError ? (
+            <div className="mt-1 text-xs text-red-300">{aiError}</div>
+          ) : aiMeta ? (
             <div className="mt-1 text-xs text-white/60">
               Depth {aiMeta.depth} · Nodes {aiMeta.nodes} · Score {Math.round(aiMeta.score)}
             </div>

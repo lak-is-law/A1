@@ -22,7 +22,7 @@ export default function PlayPage() {
   const game = params.game ?? "chess";
   const label = GAME_LABEL[game] ?? "Unknown";
 
-  const [difficulty, setDifficulty] = useState<"adaptive" | "medium" | "hard">("adaptive");
+  const [difficulty, setDifficulty] = useState<"adaptive" | "medium" | "hard" | "god">("adaptive");
 
   const difficultyCopy = useMemo(() => {
     switch (difficulty) {
@@ -30,10 +30,14 @@ export default function PlayPage() {
         return { title: "Medium", sub: "Fast search, strong heuristics" };
       case "hard":
         return { title: "Hard", sub: "Deeper search with heavier pruning" };
+      case "god":
+        return { title: "God Mode", sub: "AlphaGo-style Monte Carlo search for Baduk" };
       default:
         return { title: "Adaptive", sub: "Iterative deepening tuned per position" };
     }
   }, [difficulty]);
+
+  const difficultyOptions = game === "baduk" ? (["adaptive", "medium", "hard", "god"] as const) : (["adaptive", "medium", "hard"] as const);
 
   return (
     <div className="min-h-screen">
@@ -66,7 +70,7 @@ export default function PlayPage() {
 
           <div className="rb-glass flex items-center gap-2 rounded-2xl p-3">
             <div className="text-xs font-semibold tracking-[0.18em] text-white/60">DIFFICULTY</div>
-            {(["adaptive", "medium", "hard"] as const).map((d) => (
+            {difficultyOptions.map((d) => (
               <button
                 key={d}
                 type="button"
@@ -77,7 +81,7 @@ export default function PlayPage() {
                 ].join(" ")}
                 aria-pressed={d === difficulty}
               >
-                {d === "adaptive" ? "Adaptive" : d[0].toUpperCase() + d.slice(1)}
+                {d === "adaptive" ? "Adaptive" : d === "god" ? "God" : d[0].toUpperCase() + d.slice(1)}
               </button>
             ))}
           </div>
@@ -100,11 +104,11 @@ export default function PlayPage() {
 
             <div className="mt-5">
               {game === "chess" ? (
-                <ChessVsAi difficulty={difficulty} />
+                <ChessVsAi difficulty={difficulty === "god" ? "hard" : difficulty} />
               ) : game === "baduk" ? (
                 <BadukVsAi difficulty={difficulty} />
               ) : game === "battleship" ? (
-                <BattleshipVsAi difficulty={difficulty} />
+                <BattleshipVsAi difficulty={difficulty === "god" ? "hard" : difficulty} />
               ) : (
                 <div className="flex aspect-[4/3] items-center justify-center rounded-2xl border border-white/10 bg-black/15 p-6">
                   <div className="text-center">

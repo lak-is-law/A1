@@ -247,17 +247,22 @@ export function ChessVsAi({ difficulty }: { difficulty: Difficulty }) {
   function undo() {
     if (aiLoading) return;
     if (cursor <= 0) return;
+    const isPlayersTurn = chess.turn() === playerColor;
+    const steps = isPlayersTurn ? Math.min(2, cursor) : 1;
     setSelected(null);
     setHintMove(null);
-    setCursor((v) => v - 1);
+    setCursor((v) => Math.max(0, v - steps));
   }
 
   function redo() {
     if (aiLoading) return;
     if (cursor >= timeline.length - 1) return;
+    const isPlayersTurn = chess.turn() === playerColor;
+    const canAdvanceFullTurn = isPlayersTurn && cursor + 2 <= timeline.length - 1;
+    const steps = canAdvanceFullTurn ? 2 : 1;
     setSelected(null);
     setHintMove(null);
-    setCursor((v) => v + 1);
+    setCursor((v) => Math.min(timeline.length - 1, v + steps));
   }
 
   async function requestHint() {

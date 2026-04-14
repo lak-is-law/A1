@@ -9,7 +9,7 @@ import {
 
 const MoveReqSchema = z.object({
   game: z.enum(["chess", "baduk"]).default("chess"),
-  difficulty: z.enum(["adaptive", "easy", "medium", "hard"]).default("adaptive"),
+  difficulty: z.enum(["adaptive", "easy", "medium", "hard", "god"]).default("adaptive"),
   time_ms: z.number().int().min(50).max(10000).default(2500),
 
   fen: z.string().optional(),
@@ -21,10 +21,11 @@ const MoveReqSchema = z.object({
 
 export const runtime = "nodejs";
 
-function difficultyToDepth(difficulty: ChessDifficulty, timeMs: number): number {
+function difficultyToDepth(difficulty: ChessDifficulty | "god", timeMs: number): number {
   if (difficulty === "easy") return 2;
   if (difficulty === "medium") return 3;
   if (difficulty === "hard") return 5;
+  if (difficulty === "god") return 5;
 
   // Adaptive: scale with time budget.
   if (timeMs <= 1200) return 2;
@@ -109,6 +110,83 @@ function moveToBadukString(move: number, size: number) {
   return `${r},${c}`;
 }
 
+function parseBadukMoveString(move: string, size: number): number | null {
+  if (move === "pass") return null;
+  const parts = move.split(",");
+  if (parts.length !== 2) return null;
+  const r = Number(parts[0]);
+  const c = Number(parts[1]);
+  if (!Number.isFinite(r) || !Number.isFinite(c)) return null;
+  if (r < 0 || r >= size || c < 0 || c >= size) return null;
+  return idxOf(r, c, size);
+}
+
+function legalMovesFor(board: Stone[], toPlay: Stone, size: number): number[] {
+  const out: number[] = [];
+  for (let i = 0; i < board.length; i++) {
+    if (board[i] !== 0) continue;
+    if (isLegalMove(board, i, toPlay, size)) out.push(i);
+  }
+  return out;
+}
+
+async function requestExternalGodMove(params: {
+  board: Stone[];
+  size: number;
+  toPlay: Stone;
+  komi: number;
+  timeMs: number;
+}): Promise<
+  | { ok: true; move: number | null; depth: number; nodes: number; score: number }
+  | { ok: false; reason: string }
+> {
+  const url = process.env.BADUK_GOD_API_URL?.trim();
+  if (!url) {
+    return { ok: false, reason: "BADUK_GOD_API_URL is not configured" };
+  }
+
+  const apiKey = process.env.BADUK_GOD_API_KEY?.trim();
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  if (apiKey) headers.authorization = `Bearer ${apiKey}`;
+
+  try {
+    const timeoutMs = Math.min(6000, Math.max(400, params.timeMs + 600));
+    const res = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        game: "baduk",
+        difficulty: "god",
+        size: params.size,
+        to_play: params.toPlay === 1 ? "black" : "white",
+        komi: params.komi,
+        board: params.board,
+        time_ms: params.timeMs,
+      }),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!res.ok) {
+      return { ok: false, reason: `God provider returned HTTP ${res.status}` };
+    }
+    const data = (await res.json()) as { move?: unknown; depth?: unknown; nodes?: unknown; score?: unknown };
+    if (typeof data.move !== "string") {
+      return { ok: false, reason: "God provider response missing move string" };
+    }
+
+    const parsedMove = parseBadukMoveString(data.move, params.size);
+    if (parsedMove !== null && !isLegalMove(params.board, parsedMove, params.toPlay, params.size)) {
+      return { ok: false, reason: "God provider returned illegal move" };
+    }
+
+    const depth = typeof data.depth === "number" ? data.depth : 0;
+    const nodes = typeof data.nodes === "number" ? data.nodes : 0;
+    const score = typeof data.score === "number" ? data.score : 0;
+    return { ok: true, move: parsedMove, depth, nodes, score };
+  } catch {
+    return { ok: false, reason: "God provider request failed or timed out" };
+  }
+}
+
 export async function POST(req: Request) {
   const json = await req.json();
   const parsed = MoveReqSchema.safeParse(json);
@@ -136,11 +214,7 @@ export async function POST(req: Request) {
       }
 
       // MVP: no ko rule, but we do enforce suicide and captures.
-      const legalMoves: number[] = [];
-      for (let i = 0; i < boardLen; i++) {
-        if (board[i] !== 0) continue;
-        if (isLegalMove(board, i, toPlay, size)) legalMoves.push(i);
-      }
+      const legalMoves = legalMovesFor(board, toPlay, size);
 
       if (!legalMoves.length) {
         return NextResponse.json(
@@ -149,7 +223,34 @@ export async function POST(req: Request) {
         );
       }
 
-      // Tiny heuristic: prefer captures; tie-break by higher resulting liberties; then smallest index.
+      if (payload.difficulty === "god") {
+        const external = await requestExternalGodMove({
+          board,
+          size,
+          toPlay,
+          komi: payload.komi,
+          timeMs: Math.min(4200, payload.time_ms),
+        });
+        if (external.ok) {
+          return NextResponse.json(
+            {
+              move: external.move === null ? "pass" : moveToBadukString(external.move, size),
+              depth: external.depth || 12,
+              nodes: external.nodes,
+              score: external.score,
+            },
+            { status: 200 }
+          );
+        }
+        return NextResponse.json(
+          {
+            error: `God mode requires external Baduk API: ${external.reason}`,
+          },
+          { status: 503 }
+        );
+      }
+
+      // Baseline heuristic for non-god mode.
       let bestMove: number = legalMoves[0];
       let bestCaptured = -1;
       let bestLiberties = -1;

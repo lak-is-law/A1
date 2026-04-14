@@ -40,6 +40,12 @@ See `red-gambit/.env.example`.
 
 Key one for gameplay:
 - `AI_ENGINE_URL` (e.g. `http://localhost:8001`)
+- `BADUK_GOD_API_URL` (optional, used by Baduk `god` difficulty for external super-strong engine)
+- `BADUK_GOD_HEALTH_URL` (optional, explicit health probe URL; otherwise `/move` is mapped to `/health`)
+- `BADUK_GOD_API_KEY` (optional bearer token for that provider)
+
+Health endpoint:
+- `GET /api/engine/health` returns current status of the configured Baduk god provider.
 
 ## Engine API Contract
 
