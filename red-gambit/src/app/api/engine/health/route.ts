@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 
+import { resolveGodEngineHealthUrl } from "@/lib/engine/resolveGodEngineUrl";
+
 export const runtime = "nodejs";
 
 type ProviderStatus = {
@@ -20,29 +22,14 @@ function redactUrl(raw: string): string {
   }
 }
 
-function resolveHealthUrl(): string | null {
-  const explicit = process.env.BADUK_GOD_HEALTH_URL?.trim();
-  if (explicit) return explicit;
-  const base = process.env.BADUK_GOD_API_URL?.trim();
-  if (!base) return null;
-  try {
-    const u = new URL(base);
-    if (u.pathname.endsWith("/move")) u.pathname = u.pathname.replace(/\/move$/, "/health");
-    else if (!u.pathname.endsWith("/health")) u.pathname = `${u.pathname.replace(/\/$/, "")}/health`;
-    return u.toString();
-  } catch {
-    return null;
-  }
-}
-
 async function probeGodProvider(): Promise<ProviderStatus> {
-  const url = resolveHealthUrl();
+  const url = resolveGodEngineHealthUrl();
   const checkedAt = new Date().toISOString();
   if (!url) {
     return {
       configured: false,
       healthy: false,
-      detail: "BADUK_GOD_API_URL is not configured",
+      detail: "AI_ENGINE_URL or BADUK_GOD_API_URL is not set",
       checkedAt,
     };
   }

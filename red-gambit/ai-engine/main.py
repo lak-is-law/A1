@@ -16,7 +16,7 @@ app = FastAPI(title="Red Gambit AI Engine", version="1.0.0")
 
 
 GameType = Literal["chess", "baduk"]
-Difficulty = Literal["adaptive", "medium", "hard"]
+Difficulty = Literal["adaptive", "medium", "hard", "god"]
 
 
 class MoveRequest(BaseModel):
@@ -369,6 +369,8 @@ def pick_depth(difficulty: Difficulty, time_ms: int, board: chess.Board) -> int:
         base = 4
     elif difficulty == "hard":
         base = 6
+    elif difficulty == "god":
+        base = 7
     else:
         base = 5
 
@@ -676,10 +678,16 @@ def best_move_baduk(req: MoveRequest) -> MoveResponse:
 
     if req.difficulty == "medium":
         max_depth = 2
+        max_candidates = 10
     elif req.difficulty == "hard":
         max_depth = 3
+        max_candidates = 10
+    elif req.difficulty == "god":
+        max_depth = 4
+        max_candidates = 14
     else:
         max_depth = 3
+        max_candidates = 10
 
     best_mv: Optional[int] = None
     best_score = -10**12
@@ -693,7 +701,7 @@ def best_move_baduk(req: MoveRequest) -> MoveResponse:
         try:
             best_this_depth: Optional[int] = None
             best_this_score = -10**12
-            moves = go_candidate_moves(board, size, to_play, max_candidates=10)
+            moves = go_candidate_moves(board, size, to_play, max_candidates=max_candidates)
             if len(moves) > 1:
                 moves = moves[1:] + moves[:1]
 
@@ -745,6 +753,12 @@ def best_move_baduk(req: MoveRequest) -> MoveResponse:
         score=float(best_score),
         pv=[],
     )
+
+
+@app.get("/health")
+def health() -> Dict[str, str]:
+    """Used by Red Gambit `GET /api/engine/health` when BADUK_GOD_HEALTH_URL is derived from /move."""
+    return {"status": "ok"}
 
 
 @app.post("/move", response_model=MoveResponse)

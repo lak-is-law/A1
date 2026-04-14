@@ -6,6 +6,7 @@ import {
   validateChessFen,
   type ChessDifficulty,
 } from "@/lib/ai/chessEngine";
+import { godEngineConfigHint, resolveGodEngineMoveUrl } from "@/lib/engine/resolveGodEngineUrl";
 
 const MoveReqSchema = z.object({
   game: z.enum(["chess", "baduk"]).default("chess"),
@@ -140,9 +141,9 @@ async function requestExternalGodMove(params: {
   | { ok: true; move: number | null; depth: number; nodes: number; score: number }
   | { ok: false; reason: string }
 > {
-  const url = process.env.BADUK_GOD_API_URL?.trim();
+  const url = resolveGodEngineMoveUrl();
   if (!url) {
-    return { ok: false, reason: "BADUK_GOD_API_URL is not configured" };
+    return { ok: false, reason: godEngineConfigHint() };
   }
 
   const apiKey = process.env.BADUK_GOD_API_KEY?.trim();
@@ -244,7 +245,7 @@ export async function POST(req: Request) {
         }
         return NextResponse.json(
           {
-            error: `God mode requires external Baduk API: ${external.reason}`,
+            error: `Baduk God mode needs a running engine: ${external.reason}`,
           },
           { status: 503 }
         );

@@ -40,7 +40,8 @@ See `red-gambit/.env.example`.
 
 Key one for gameplay:
 - `AI_ENGINE_URL` (e.g. `http://localhost:8001`)
-- `BADUK_GOD_API_URL` (optional, used by Baduk `god` difficulty for external super-strong engine)
+- `AI_ENGINE_URL` is enough for Baduk **God**: the app calls `AI_ENGINE_URL` + `/move` with `difficulty: god`. Deploy `ai-engine/` (see its `Dockerfile`) on Render/Railway/Fly, then set this to `https://your-service.onrender.com` (no `/move`).
+- `BADUK_GOD_API_URL` (optional override if God mode should hit a different `/move` than `AI_ENGINE_URL`)
 - `BADUK_GOD_HEALTH_URL` (optional, explicit health probe URL; otherwise `/move` is mapped to `/health`)
 - `BADUK_GOD_API_KEY` (optional bearer token for that provider)
 
