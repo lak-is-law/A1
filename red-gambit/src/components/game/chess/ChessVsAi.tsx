@@ -10,7 +10,7 @@ import { describeEvaluation, getBestMove, type ChessAiMode } from "@/lib/ai/getB
 
 const INITIAL_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
-type Difficulty = "adaptive" | "medium" | "hard";
+type Difficulty = "adaptive" | "medium" | "hard" | "god";
 
 function vibrate(pattern: number | number[]) {
   try {
@@ -71,14 +71,19 @@ function uciToMove(uci: string): { from: Square; to: Square; promotion?: string 
 
 function timeForDifficulty(d: Difficulty) {
   if (d === "medium") return 1800;
-  if (d === "hard") return 3200;
+  if (d === "hard" || d === "god") return 3200;
   return 2500;
+}
+
+function minimaxDifficultyForApi(d: Difficulty): "adaptive" | "medium" | "hard" {
+  if (d === "god") return "hard";
+  return d;
 }
 
 export function ChessVsAi({ difficulty }: { difficulty: Difficulty }) {
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
-  const [aiMode, setAiMode] = useState<ChessAiMode>("minimax");
+  const aiMode: ChessAiMode = difficulty === "god" ? "stockfish" : "minimax";
   const [timeline, setTimeline] = useState<string[]>([INITIAL_FEN]);
   const [cursor, setCursor] = useState(0);
   const fen = timeline[cursor];
@@ -169,10 +174,9 @@ export function ChessVsAi({ difficulty }: { difficulty: Difficulty }) {
     setHintMove(null);
 
     try {
-      const mode = aiMode;
-      const result = await getBestMove(mode, currentFen, {
+      const result = await getBestMove(aiMode, currentFen, {
         stockfish: { depth: 15, timeoutMs: 45_000 },
-        minimax: { difficulty, time_ms: timeForDifficulty(difficulty) },
+        minimax: { difficulty: minimaxDifficultyForApi(difficulty), time_ms: timeForDifficulty(difficulty) },
       });
 
       if (requestId !== requestIdRef.current) return; // ignore stale
@@ -222,7 +226,7 @@ export function ChessVsAi({ difficulty }: { difficulty: Difficulty }) {
     if (chess.turn() !== aiColor) return;
     void requestAiMove(fen);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fen, isGameOver, aiLoading, aiMode]);
+  }, [fen, isGameOver, aiLoading, aiMode, difficulty]);
 
   useEffect(() => {
     if (!mounted) return;
@@ -278,7 +282,7 @@ export function ChessVsAi({ difficulty }: { difficulty: Difficulty }) {
     try {
       const result = await getBestMove(aiMode, fen, {
         stockfish: { depth: 12, timeoutMs: 30_000 },
-        minimax: { difficulty, time_ms: 1200 },
+        minimax: { difficulty: minimaxDifficultyForApi(difficulty), time_ms: 1200 },
       });
       if (requestId !== requestIdRef.current) return;
 
@@ -363,7 +367,9 @@ export function ChessVsAi({ difficulty }: { difficulty: Difficulty }) {
           <div className="text-xs font-semibold tracking-[0.22em] text-white/60">CHESS</div>
           <div className="mt-1 font-extrabold">{isGameOver ? "Game Over" : chess.turn() === playerColor ? "Your turn" : "AI turn"}</div>
           <div className="mt-1 text-xs font-bold text-white/70">
-            {aiMode === "stockfish" ? "🔥 God Mode (Stockfish)" : "🧠 Human Mode (Minimax)"}
+            {difficulty === "god"
+              ? "God mode (Stockfish)"
+              : `Minimax · ${difficulty === "adaptive" ? "Adaptive" : difficulty[0].toUpperCase() + difficulty.slice(1)}`}
           </div>
           {aiLoading ? <div className="mt-1 text-xs text-[color:var(--rb-accent)]">AI thinking…</div> : null}
           {evalHint ? <div className="mt-1 text-xs text-white/65">{evalHint}</div> : null}
@@ -378,34 +384,6 @@ export function ChessVsAi({ difficulty }: { difficulty: Difficulty }) {
             <div className="mt-1 text-xs text-white/55">Click-to-move. Undo/redo supported.</div>
           )}
         </div>
-
-        <div className="flex flex-col items-end gap-2 sm:flex-row sm:items-center">
-          <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-bold select-none">
-            <span className="text-white/60">AI</span>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={aiMode === "stockfish"}
-              disabled={aiLoading}
-              onClick={() => setAiMode((m) => (m === "stockfish" ? "minimax" : "stockfish"))}
-              className={[
-                "relative h-7 w-12 rounded-full transition-colors",
-                aiMode === "stockfish" ? "bg-[color:var(--rb-accent)]/50" : "bg-white/15",
-                aiLoading ? "opacity-50" : "",
-              ].join(" ")}
-            >
-              <span
-                className={[
-                  "absolute top-0.5 h-6 w-6 rounded-full bg-white shadow transition-transform",
-                  aiMode === "stockfish" ? "translate-x-6" : "translate-x-0.5",
-                ].join(" ")}
-                style={{ left: "-4px", top: "1px" }}
-              />
-            </button>
-            <span className="max-w-[7rem] text-right text-[11px] text-white/80">
-              {aiMode === "stockfish" ? "God" : "Human"}
-            </span>
-          </label>
 
         <div className="flex items-center gap-2">
           <button
@@ -440,7 +418,6 @@ export function ChessVsAi({ difficulty }: { difficulty: Difficulty }) {
           >
             Hint ({hintCount})
           </button>
-        </div>
         </div>
       </div>
 

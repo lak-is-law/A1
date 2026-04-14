@@ -31,13 +31,22 @@ export default function PlayPage() {
       case "hard":
         return { title: "Hard", sub: "Deeper search with heavier pruning" };
       case "god":
-        return { title: "God Mode", sub: "AlphaGo-style Monte Carlo search for Baduk" };
+        return {
+          title: "God Mode",
+          sub:
+            game === "chess"
+              ? "Stockfish in the browser (WASM)—near maximum practical strength"
+              : "Server-backed deep search for Baduk",
+        };
       default:
         return { title: "Adaptive", sub: "Iterative deepening tuned per position" };
     }
-  }, [difficulty]);
+  }, [difficulty, game]);
 
-  const difficultyOptions = game === "baduk" ? (["adaptive", "medium", "hard", "god"] as const) : (["adaptive", "medium", "hard"] as const);
+  const difficultyOptions =
+    game === "baduk" || game === "chess"
+      ? (["adaptive", "medium", "hard", "god"] as const)
+      : (["adaptive", "medium", "hard"] as const);
 
   return (
     <div className="min-h-screen">
@@ -104,7 +113,7 @@ export default function PlayPage() {
 
             <div className="mt-5">
               {game === "chess" ? (
-                <ChessVsAi difficulty={difficulty === "god" ? "hard" : difficulty} />
+                <ChessVsAi difficulty={difficulty} />
               ) : game === "baduk" ? (
                 <BadukVsAi difficulty={difficulty} />
               ) : game === "battleship" ? (
