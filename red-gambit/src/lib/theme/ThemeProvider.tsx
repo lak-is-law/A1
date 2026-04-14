@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { BackgroundMusic } from "@/components/BackgroundMusic";
 import { useThemeStore } from "./themeStore";
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
@@ -16,6 +17,11 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
 
-  return children;
+  return (
+    <>
+      {children}
+      <BackgroundMusic />
+    </>
+  );
 }
 
